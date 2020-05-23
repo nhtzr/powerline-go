@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	pwl "github.com/justjanne/powerline-go/powerline"
 	"os"
 	"os/exec"
@@ -13,25 +12,24 @@ func segmentJobs(p *powerline) []pwl.Segment {
 	nJobs := -1
 
 	ppid := os.Getppid()
-	if *p.args.Shell == "bash" {
-		pppidOut, _ := exec.Command("ps", "-p", strconv.Itoa(ppid), "-oppid=").Output()
-		pppid, _ := strconv.ParseInt(strings.TrimSpace(string(pppidOut)), 10, 64)
-		ppid = int(pppid)
-	}
-
 	out, _ := exec.Command("ps", "-oppid=").Output()
 	processes := strings.Split(string(out), "\n")
 	for _, processPpidStr := range processes {
-		processPpid, _ := strconv.ParseInt(strings.TrimSpace(processPpidStr), 10, 64)
+		currPpid := strings.TrimSpace(processPpidStr)
+		processPpid, _ := strconv.ParseInt(currPpid, 10, 64)
 		if int(processPpid) == ppid {
 			nJobs++
 		}
 	}
 
+	content := "\uf013"
+	if nJobs > 1 {
+		content = "\uf085"
+	}
 	if nJobs > 0 {
 		return []pwl.Segment{{
 			Name:       "jobs",
-			Content:    fmt.Sprintf("%d", nJobs),
+			Content:    content,
 			Foreground: p.theme.JobsFg,
 			Background: p.theme.JobsBg,
 		}}

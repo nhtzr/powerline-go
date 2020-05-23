@@ -1,233 +1,70 @@
 package main
 
 import (
-	"os"
-	"sort"
+	"regexp"
 	"strings"
 
 	pwl "github.com/justjanne/powerline-go/powerline"
 )
 
-const ellipsis = "\u2026"
-
-type pathSegment struct {
-	path     string
-	home     bool
-	root     bool
-	ellipsis bool
-	alias    bool
-}
-
-type byRevLength []string
-
-func (s byRevLength) Len() int {
-	return len(s)
-}
-func (s byRevLength) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
-}
-func (s byRevLength) Less(i, j int) bool {
-	return len(s[i]) > len(s[j])
-}
-
-func maybeAliasPathSegments(p *powerline, pathSegments []pathSegment) []pathSegment {
-	pathSeparator := string(os.PathSeparator)
-
-	if p.pathAliases == nil {
-		return pathSegments
-	}
-
-	keys := make([]string, len(p.pathAliases))
-	for k := range p.pathAliases {
-		keys = append(keys, k)
-	}
-	sort.Sort(byRevLength(keys))
-
-Aliases:
-	for _, k := range keys {
-		// This turns a string like "foo/bar/baz" into an array of strings.
-		path := strings.Split(strings.Trim(k, pathSeparator), pathSeparator)
-
-		// If the path has 3 elements, we know we should look at pathSegments
-		// in 3-element chunks.
-		size := len(path)
-		// If there aren't that many segments in our path we can skip to the
-		// next alias.
-		if size > len(pathSegments) {
-			continue Aliases
-		}
-
-		alias := p.pathAliases[k]
-
-	Segments:
-		// We want to see if that array of strings exists in pathSegments.
-		for i := range pathSegments {
-			// This is the upper index that we would look at. So if i is 0,
-			// then we'd look at pathSegments[0,1,2], then [1,2,3], etc.. If i
-			// is 2, we'd look at pathSegments[2,3,4] and so on.
-			max := (i + size) - 1
-
-			// But if the upper index is out of bounds we can short-circuit
-			// and move on to the next alias.
-			if max > (len(pathSegments)-i)-1 {
-				continue Aliases
-			}
-
-			// Then we loop over the indices in path and compare the
-			// elements. If any element doesn't match we can move on to the
-			// next index in pathSegments.
-			for j := range path {
-				if path[j] != pathSegments[i+j].path {
-					continue Segments
-				}
-			}
-
-			// They all matched! That means we can replace this slice with our
-			// alias and skip to the next alias.
-			pathSegments = append(
-				pathSegments[:i],
-				append(
-					[]pathSegment{{
-						path:  alias,
-						alias: true,
-					}},
-					pathSegments[max+1:]...,
-				)...,
-			)
-			continue Aliases
-		}
-	}
-
-	return pathSegments
-}
-
-func cwdToPathSegments(p *powerline, cwd string) []pathSegment {
-	pathSeparator := string(os.PathSeparator)
-	pathSegments := make([]pathSegment, 0)
-
-	if strings.HasPrefix(cwd, p.userInfo.HomeDir) {
-		pathSegments = append(pathSegments, pathSegment{
-			path: "~",
-			home: true,
-		})
-		cwd = cwd[len(p.userInfo.HomeDir):]
-	} else if cwd == pathSeparator {
-		pathSegments = append(pathSegments, pathSegment{
-			path: pathSeparator,
-			root: true,
-		})
-	}
-
-	cwd = strings.Trim(cwd, pathSeparator)
-	names := strings.Split(cwd, pathSeparator)
-	if names[0] == "" {
-		names = names[1:]
-	}
-
-	for _, name := range names {
-		pathSegments = append(pathSegments, pathSegment{
-			path: name,
-		})
-	}
-
-	return maybeAliasPathSegments(p, pathSegments)
-}
-
-func maybeShortenName(p *powerline, pathSegment string) string {
-	if *p.args.CwdMaxDirSize > 0 && len(pathSegment) > *p.args.CwdMaxDirSize {
-		return pathSegment[:*p.args.CwdMaxDirSize]
-	}
-	return pathSegment
-}
-
-func escapeVariables(p *powerline, pathSegment string) string {
-	pathSegment = strings.Replace(pathSegment, `\`, p.shellInfo.escapedBackslash, -1)
-	pathSegment = strings.Replace(pathSegment, "`", p.shellInfo.escapedBacktick, -1)
-	pathSegment = strings.Replace(pathSegment, `$`, p.shellInfo.escapedDollar, -1)
-	return pathSegment
-}
-
-func getColor(p *powerline, pathSegment pathSegment, isLastDir bool) (uint8, uint8, bool) {
-	if pathSegment.home && p.theme.HomeSpecialDisplay {
-		return p.theme.HomeFg, p.theme.HomeBg, true
-	} else if pathSegment.alias {
-		return p.theme.AliasFg, p.theme.AliasBg, true
-	} else if isLastDir {
-		return p.theme.CwdFg, p.theme.PathBg, false
-	}
-	return p.theme.PathFg, p.theme.PathBg, false
-}
-
 func segmentCwd(p *powerline) (segments []pwl.Segment) {
 	cwd := p.cwd
 
-	if *p.args.CwdMode == "plain" {
-		if strings.HasPrefix(cwd, p.userInfo.HomeDir) {
-			cwd = "~" + cwd[len(p.userInfo.HomeDir):]
-		}
-
-		segments = append(segments, pwl.Segment{
-			Name:       "cwd",
-			Content:    cwd,
-			Foreground: p.theme.CwdFg,
-			Background: p.theme.PathBg,
-		})
-	} else {
-		pathSegments := cwdToPathSegments(p, cwd)
-
-		if *p.args.CwdMode == "dironly" {
-			pathSegments = pathSegments[len(pathSegments)-1:]
-		} else {
-			maxDepth := *p.args.CwdMaxDepth
-			if maxDepth <= 0 {
-				warn("Ignoring -cwd-max-depth argument since it's smaller than or equal to 0")
-			} else if len(pathSegments) > maxDepth {
-				var nBefore int
-				if maxDepth > 2 {
-					nBefore = 2
-				} else {
-					nBefore = maxDepth - 1
-				}
-				firstPart := pathSegments[:nBefore]
-				secondPart := pathSegments[len(pathSegments)+nBefore-maxDepth:]
-
-				pathSegments = make([]pathSegment, 0)
-				pathSegments = append(pathSegments, firstPart...)
-				pathSegments = append(pathSegments, pathSegment{
-					path:     ellipsis,
-					ellipsis: true,
-				})
-				pathSegments = append(pathSegments, secondPart...)
-			}
-		}
-
-		for idx, pathSegment := range pathSegments {
-			isLastDir := idx == len(pathSegments)-1
-			foreground, background, special := getColor(p, pathSegment, isLastDir)
-
-			segment := pwl.Segment{
-				Content:    escapeVariables(p, maybeShortenName(p, pathSegment.path)),
-				Foreground: foreground,
-				Background: background,
-			}
-
-			if !special {
-				if p.align == alignRight && p.supportsRightModules() && idx != 0 {
-					segment.Separator = p.symbolTemplates.SeparatorReverseThin
-					segment.SeparatorForeground = p.theme.SeparatorFg
-				} else if (p.align == alignLeft || !p.supportsRightModules()) && !isLastDir {
-					segment.Separator = p.symbolTemplates.SeparatorThin
-					segment.SeparatorForeground = p.theme.SeparatorFg
-				}
-			}
-
-			segment.Name = "cwd-path"
-			if isLastDir {
-				segment.Name = "cwd"
-			}
-
-			segments = append(segments, segment)
-		}
+	if strings.HasPrefix(cwd, p.userInfo.HomeDir) {
+		cwd = "~" + cwd[len(p.userInfo.HomeDir):]
 	}
+
+	lencwd := len(cwd)
+	if lencwd > 50 || (lencwd > TermWidth() * 40 / 100) {
+		cwd = shorten(cwd)
+	}
+
+	segments = append(segments, pwl.Segment{
+		Name:       "cwd",
+		Content:    cwd,
+		Foreground: p.theme.HomeFg,
+		Background: p.theme.HomeBg,
+	})
+
 	return segments
+}
+
+func shorten(cwd string) string {
+	if strings.HasPrefix(cwd, "/") {
+		cwd = cwd[len("/"):]
+	}
+	dirs := strings.Split(cwd, "/")
+	lastThreeIdx := len(dirs) - 3
+	if lastThreeIdx > 0 {
+		dirs = append([]string{"\uF141"}, dirs[lastThreeIdx:]...)
+	}
+	for i, dir := range dirs {
+		if matches, _ := regexp.MatchString("^[0-9A-Za-z]{32}", dir); matches {
+			dirs[i] = cap(dir, 9)
+			continue
+		}
+		if matches, _ := regexp.MatchString("^[A-Za-z_ ]+$", dir); matches {
+			dirs[i] = cap(dir, 3)
+			continue
+		}
+		if matches, _ := regexp.MatchString("^\\.[A-Za-z_ ]+$", dir); matches {
+			dirs[i] = cap(dir, 4)
+			continue
+		}
+
+		dirs[i] = cap(dir, 9)
+	}
+	return strings.Join(dirs, "/")
+}
+
+func cap(dir string, maxLength int) string {
+	i := min(maxLength, len(dir))
+	return dir[:i]
+}
+
+func min(l int, r int) int {
+	if l < r {
+		return l
+	}
+	return r
 }

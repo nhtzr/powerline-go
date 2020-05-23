@@ -194,7 +194,7 @@ func (p *powerline) newRow() {
 	p.curSegment = p.curSegment + 1
 }
 
-func termWidth() int {
+func TermWidth() int {
 	termWidth, _, err := terminal.GetSize(int(os.Stdin.Fd()))
 	if err != nil {
 		shellMaxLengthStr, found := os.LookupEnv("COLUMNS")
@@ -215,7 +215,7 @@ func termWidth() int {
 
 func (p *powerline) truncateRow(rowNum int) {
 
-	shellMaxLength := termWidth() * *p.args.MaxWidthPercentage / 100
+	shellMaxLength := TermWidth() * *p.args.MaxWidthPercentage / 100
 	row := p.Segments[rowNum]
 	rowLength := 0
 

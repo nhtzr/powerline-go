@@ -26,24 +26,20 @@ func (r repoStats) dirty() bool {
 }
 
 func addRepoStatsSegment(nChanges int, symbol string, foreground uint8, background uint8) []pwl.Segment {
-	if nChanges > 0 {
-		return []pwl.Segment{{
-			Name:       "git-status",
-			Content:    fmt.Sprintf("%d%s", nChanges, symbol),
-			Foreground: foreground,
-			Background: background,
-		}}
+	if nChanges <= 0 {
+		return []pwl.Segment{}
 	}
-	return []pwl.Segment{}
+	return []pwl.Segment{{
+		Name:       "git-status",
+		Content:    fmt.Sprintf("%d %s", nChanges, symbol),
+		Foreground: foreground,
+		Background: background,
+	}}
 }
 
 func (r repoStats) GitSegments(p *powerline) (segments []pwl.Segment) {
 	segments = append(segments, addRepoStatsSegment(r.ahead, p.symbolTemplates.RepoAhead, p.theme.GitAheadFg, p.theme.GitAheadBg)...)
 	segments = append(segments, addRepoStatsSegment(r.behind, p.symbolTemplates.RepoBehind, p.theme.GitBehindFg, p.theme.GitBehindBg)...)
-	segments = append(segments, addRepoStatsSegment(r.staged, p.symbolTemplates.RepoStaged, p.theme.GitStagedFg, p.theme.GitStagedBg)...)
-	segments = append(segments, addRepoStatsSegment(r.notStaged, p.symbolTemplates.RepoNotStaged, p.theme.GitNotStagedFg, p.theme.GitNotStagedBg)...)
-	segments = append(segments, addRepoStatsSegment(r.untracked, p.symbolTemplates.RepoUntracked, p.theme.GitUntrackedFg, p.theme.GitUntrackedBg)...)
-	segments = append(segments, addRepoStatsSegment(r.conflicted, p.symbolTemplates.RepoConflicted, p.theme.GitConflictedFg, p.theme.GitConflictedBg)...)
 	segments = append(segments, addRepoStatsSegment(r.stashed, p.symbolTemplates.RepoStashed, p.theme.GitStashedFg, p.theme.GitStashedBg)...)
 	return
 }
@@ -155,55 +151,23 @@ func segmentGit(p *powerline) []pwl.Segment {
 		return []pwl.Segment{}
 	}
 
-	indexSize, err := indexSize(p.cwd)
-	args := []string{
-		"status", "--porcelain", "-b", "--ignore-submodules",
-	}
-
-	if *p.args.GitAssumeUnchangedSize > 0 && indexSize > (*p.args.GitAssumeUnchangedSize*1024) {
-		args = append(args, "-uno")
-	}
-
-	out, err := runGitCommand("git", args...)
+	status, err := status(p)
 	if err != nil {
 		return []pwl.Segment{}
 	}
 
-	status := strings.Split(out, "\n")
-	stats := parseGitStats(status)
 	branchInfo := parseGitBranchInfo(status)
-	var branch string
-
-	if branchInfo["local"] != "" {
-		ahead, _ := strconv.ParseInt(branchInfo["ahead"], 10, 32)
-		stats.ahead = int(ahead)
-
-		behind, _ := strconv.ParseInt(branchInfo["behind"], 10, 32)
-		stats.behind = int(behind)
-
-		branch = branchInfo["local"]
-	} else {
-		branch = getGitDetachedBranch(p)
-	}
-
-	if len(p.symbolTemplates.RepoBranch) > 0 {
-		branch = fmt.Sprintf("%s %s", p.symbolTemplates.RepoBranch, branch)
-	}
+	stats := genStats(status, branchInfo)
+	branch := genBranch(p, branchInfo, stats)
 
 	var foreground, background uint8
-	if stats.dirty() {
+	if dirty() {
 		foreground = p.theme.RepoDirtyFg
 		background = p.theme.RepoDirtyBg
 	} else {
 		foreground = p.theme.RepoCleanFg
 		background = p.theme.RepoCleanBg
 	}
-
-	out, err = runGitCommand("git", "rev-list", "-g", "refs/stash")
-	if err == nil && len(out) > 0 {
-		stats.stashed = len(strings.Split(out, "\n")) - 1
-	}
-
 	segments := []pwl.Segment{{
 		Name:       "git-branch",
 		Content:    branch,
@@ -212,4 +176,94 @@ func segmentGit(p *powerline) []pwl.Segment {
 	}}
 	segments = append(segments, stats.GitSegments(p)...)
 	return segments
+}
+
+func status(p *powerline) ([]string, error) {
+	indexSize, err := indexSize(p.cwd)
+	args := []string{
+		"status", "--porcelain", "-b", "--ignore-submodules",
+	}
+	if *p.args.GitAssumeUnchangedSize > 0 && indexSize > (*p.args.GitAssumeUnchangedSize*1024) {
+		args = append(args, "-uno")
+	}
+	out, err := runGitCommand("git", args...)
+	if err != nil {
+		return nil, err
+	}
+	status := strings.Split(out, "\n")
+	return status, nil
+}
+
+func genBranch(p *powerline, branchInfo map[string]string, stats repoStats) string {
+	var branch string
+	if branchInfo["local"] != "" {
+		branch = branchInfo["local"]
+	} else {
+		branch = getGitDetachedBranch(p)
+	}
+
+	lenbranch := len(branch)
+	if lenbranch > 14 || (lenbranch > TermWidth()*25/100) {
+		branch = shortenBranch(branch)
+	}
+	branch = fmt.Sprintf("%s %s ", p.symbolTemplates.RepoBranch, branch)
+	branch = stats.appendRepostatSymbols(p, branch)
+	branch = strings.TrimSpace(branch)
+	return branch
+}
+
+func genStats(status []string, branchInfo map[string]string) repoStats {
+	stats := parseGitStats(status)
+	if branchInfo["local"] != "" {
+		ahead, _ := strconv.ParseInt(branchInfo["ahead"], 10, 32)
+		stats.ahead = int(ahead)
+
+		behind, _ := strconv.ParseInt(branchInfo["behind"], 10, 32)
+		stats.behind = int(behind)
+	}
+
+	out, err := runGitCommand("git", "rev-list", "-g", "refs/stash")
+	if err == nil && len(out) > 0 {
+		stats.stashed = len(strings.Split(out, "\n")) - 1
+	}
+	return stats
+}
+
+func shortenPrefix(branch string, prefix string, to string) string {
+	if strings.HasPrefix(branch, prefix) {
+		return fmt.Sprintf("%s%s", to, branch[len(prefix):])
+	}
+	return branch
+}
+
+func shortenBranch(branch string) string {
+	branch = shortenPrefix(branch, "release/", "r/")
+	branch = shortenPrefix(branch, "release-", "r/")
+	branch = shortenPrefix(branch, "feature/", "f/")
+	branch = shortenPrefix(branch, "feat/", "f/")
+	branch = shortenPrefix(branch, "chore/", "c/")
+	branch = shortenPrefix(branch, "master", "m")
+	return branch
+}
+
+func appendRepostatSymbol(branch string, nChanges int, symbol string) string {
+	if nChanges <= 0 {
+		return branch
+	}
+	return fmt.Sprintf("%s%s", branch, symbol)
+}
+
+func (r repoStats) appendRepostatSymbols(p *powerline, branch string) string {
+	branch = appendRepostatSymbol(branch, r.notStaged, p.symbolTemplates.RepoNotStaged)
+	branch = appendRepostatSymbol(branch, r.conflicted, p.symbolTemplates.RepoConflicted)
+	return branch
+}
+
+func dirty() bool {
+	describe, err := runGitCommand("git", "describe", "--always", "--dirty")
+	if err != nil {
+		return true
+	}
+	describe = strings.TrimSpace(describe)
+	return strings.HasSuffix(describe, "-dirty")
 }

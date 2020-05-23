@@ -59,6 +59,7 @@ type args struct {
 	DurationMin            *string
 	Eval                   *bool
 	Condensed              *bool
+	IgnoreUser             *string
 }
 
 func warn(msg string) {
@@ -265,6 +266,10 @@ func main() {
 			"condensed",
 			false,
 			comments("Remove spacing between segments")),
+		IgnoreUser: flag.String(
+			"ignore-user",
+			"",
+			comments("")),
 	}
 	flag.Parse()
 	if strings.HasSuffix(*args.Theme, ".json") {
