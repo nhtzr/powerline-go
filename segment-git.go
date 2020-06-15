@@ -25,23 +25,30 @@ func (r repoStats) dirty() bool {
 	return r.untracked+r.notStaged+r.staged+r.conflicted > 0
 }
 
-func addRepoStatsSegment(nChanges int, symbol string, foreground uint8, background uint8) []pwl.Segment {
+func addRepoStatsSegment(content string, nChanges int, symbol string) string {
 	if nChanges <= 0 {
+		return content
+	}
+	if content != "" {
+		content = content + " "
+	}
+	return fmt.Sprintf("%s%d%s", content, nChanges, symbol)
+}
+
+func (r repoStats) GitSegments(p *powerline) []pwl.Segment {
+	var content string
+	content = addRepoStatsSegment(content, r.ahead, p.symbolTemplates.RepoAhead)
+	content = addRepoStatsSegment(content, r.behind, p.symbolTemplates.RepoBehind)
+	content = addRepoStatsSegment(content, r.stashed, p.symbolTemplates.RepoBehind)
+	if content == "" {
 		return []pwl.Segment{}
 	}
 	return []pwl.Segment{{
 		Name:       "git-status",
-		Content:    fmt.Sprintf("%d %s", nChanges, symbol),
-		Foreground: foreground,
-		Background: background,
+		Content:    content,
+		Foreground: p.theme.GitAheadFg,
+		Background: p.theme.GitAheadBg,
 	}}
-}
-
-func (r repoStats) GitSegments(p *powerline) (segments []pwl.Segment) {
-	segments = append(segments, addRepoStatsSegment(r.ahead, p.symbolTemplates.RepoAhead, p.theme.GitAheadFg, p.theme.GitAheadBg)...)
-	segments = append(segments, addRepoStatsSegment(r.behind, p.symbolTemplates.RepoBehind, p.theme.GitBehindFg, p.theme.GitBehindBg)...)
-	segments = append(segments, addRepoStatsSegment(r.stashed, p.symbolTemplates.RepoStashed, p.theme.GitStashedFg, p.theme.GitStashedBg)...)
-	return
 }
 
 var branchRegex = regexp.MustCompile(`^## (?P<local>\S+?)(\.{3}(?P<remote>\S+?)( \[(ahead (?P<ahead>\d+)(, )?)?(behind (?P<behind>\d+))?])?)?$`)
@@ -174,8 +181,7 @@ func segmentGit(p *powerline) []pwl.Segment {
 		Foreground: foreground,
 		Background: background,
 	}}
-	segments = append(segments, stats.GitSegments(p)...)
-	return segments
+	return append(segments, stats.GitSegments(p)...)
 }
 
 func status(p *powerline) ([]string, error) {
@@ -206,7 +212,7 @@ func genBranch(p *powerline, branchInfo map[string]string, stats repoStats) stri
 	if lenbranch > 14 || (lenbranch > TermWidth()*25/100) {
 		branch = shortenBranch(branch)
 	}
-	branch = fmt.Sprintf("%s %s ", p.symbolTemplates.RepoBranch, branch)
+	branch = fmt.Sprintf("%s%s", p.symbolTemplates.RepoBranch, branch)
 	branch = stats.appendRepostatSymbols(p, branch)
 	branch = strings.TrimSpace(branch)
 	return branch
@@ -246,16 +252,17 @@ func shortenBranch(branch string) string {
 	return branch
 }
 
-func appendRepostatSymbol(branch string, nChanges int, symbol string) string {
+func appendRepostatSymbol(branch string, nChanges int, symbol string, pre string) (string, string) {
 	if nChanges <= 0 {
-		return branch
+		return pre, branch
 	}
-	return fmt.Sprintf("%s%s", branch, symbol)
+	return "", fmt.Sprintf("%s%s%s", branch, pre, symbol)
 }
 
 func (r repoStats) appendRepostatSymbols(p *powerline, branch string) string {
-	branch = appendRepostatSymbol(branch, r.notStaged, p.symbolTemplates.RepoNotStaged)
-	branch = appendRepostatSymbol(branch, r.conflicted, p.symbolTemplates.RepoConflicted)
+	pre := " "
+	pre, branch = appendRepostatSymbol(branch, r.notStaged, p.symbolTemplates.RepoNotStaged, pre)
+	pre, branch = appendRepostatSymbol(branch, r.conflicted, p.symbolTemplates.RepoConflicted, pre)
 	return branch
 }
 

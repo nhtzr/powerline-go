@@ -295,7 +295,6 @@ func (p *powerline) numEastAsianRunes(segmentContent *string) int {
 
 func (p *powerline) drawRow(rowNum int, buffer *bytes.Buffer) {
 	row := p.Segments[rowNum]
-	numEastAsianRunes := 0
 
 	// Prepend padding
 	if p.isRightPrompt() {
@@ -336,10 +335,9 @@ func (p *powerline) drawRow(rowNum int, buffer *bytes.Buffer) {
 			buffer.WriteRune(' ')
 		}
 		buffer.WriteString(segment.Content)
-		numEastAsianRunes += p.numEastAsianRunes(&segment.Content)
-		if !*p.args.Condensed {
-			buffer.WriteRune(' ')
-		}
+		//if !*p.args.Condensed {
+		//	buffer.WriteRune(' ')
+		//}
 		if !p.isRightPrompt() {
 			buffer.WriteString(separatorBackground)
 			buffer.WriteString(p.fgColor(segment.SeparatorForeground))
@@ -351,13 +349,6 @@ func (p *powerline) drawRow(rowNum int, buffer *bytes.Buffer) {
 	// Append padding before cursor for left-aligned prompts
 	if !p.isRightPrompt() || !p.hasRightModules() {
 		buffer.WriteRune(' ')
-	}
-
-	// Don't append padding for right-aligned modules
-	if !p.isRightPrompt() {
-		for i := 0; i < numEastAsianRunes; i++ {
-			buffer.WriteRune(' ')
-		}
 	}
 }
 
